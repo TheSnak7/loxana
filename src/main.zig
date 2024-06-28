@@ -1,6 +1,7 @@
 const std = @import("std");
 const safeUnreachable = @import("util.zig").safeUnreachable;
 const Chunk = @import("chunk.zig").Chunk;
+const VM = @import("vm.zig");
 
 pub fn main() !void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -8,23 +9,35 @@ pub fn main() !void {
 
     const gpa = general_purpose_allocator.allocator();
 
+    var vm = VM.init(gpa);
+    defer vm.deinit();
+
     var chunk = try Chunk.init(gpa);
     defer chunk.deinit();
 
-    const constant = try chunk.addConstant(1.2);
-    try chunk.writeOp(.op_constant, 123);
-    try chunk.write(u8, @intCast(constant), 123);
+    //const constant = try chunk.addConstant(1.2);
+    //try chunk.writeOp(.constant, 123);
+    //try chunk.write(u8, @intCast(constant), 123);
 
-    const con2 = try chunk.addConstant(1.3);
+    //try chunk.writeOp(.negate, 125);
+    //try chunk.writeOp(.ret, 125);
 
-    try chunk.writeOp(.op_constant, 124);
-    try chunk.write(u8, @intCast(con2), 124);
+    try chunk.writeAssembly(.{
+        1.2,
+        2,
+    }, .{
+        .{ .constant, "0", 123 },
+        .{ .constant, "0", 124 },
+        .{ .add, 125 },
+        .{ .negate, 125 },
+        .{ .constant, "1", 125 },
+        .{ .divide, 125 },
+        .{ .ret, 125 },
+    });
 
-    try chunk.writeOp(.op_constant_long, 124);
-    try chunk.write(u24, con2, 124);
+    //FIXME: wrap all errors
+    _ = try vm.interpret(&chunk);
 
-    try chunk.writeOp(.op_return, 125);
-
-    const stdout = std.io.getStdOut().writer();
-    try chunk.disassemble(stdout, "Test chunk");
+    //const stdout = std.io.getStdOut().writer();
+    //try chunk.disassemble(stdout, "Test chunk");
 }

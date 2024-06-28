@@ -1,24 +1,12 @@
 const std = @import("std");
 const Value = @import("value.zig").Value;
-const Writer = std.io.AnyWriter;
-
-//Using op_ to avoid annoying name collisions with Zig keywords
-pub const OpCode = enum(u8) {
-    op_return,
-    op_constant,
-    op_constant_long,
-
-    pub fn instructionLen(self: OpCode) u8 {
-        return switch (self) {
-            .op_return => 1,
-            .op_constant => 2,
-            .op_constant_long => 4,
-        };
-    }
-};
+const OpCode = @import("opcode.zig").OpCode;
+const Debug = @import("debug.zig");
 
 pub const Chunk = struct {
-    const ConstantIndex = u24;
+    pub usingnamespace Debug;
+
+    pub const ConstantIndex = u24;
     const Line = struct {
         intruction_count: u32,
         line_number: u32,
@@ -72,6 +60,25 @@ pub const Chunk = struct {
         }
     }
 
+    pub fn writeAssembly(self: *Chunk, cons: anytype, asmb: anytype) !void {
+        var constants: [cons.len]ConstantIndex = undefined;
+        inline for (cons, 0..) |constant, idx| {
+            constants[idx] = try self.addConstant(constant);
+        }
+
+        inline for (asmb) |tuple| {
+            const operand = tuple[0];
+            const line = tuple[tuple.len - 1];
+
+            try self.writeOp(operand, line);
+
+            inline for (1..tuple.len - 1) |idx| {
+                const constant = try std.fmt.parseInt(ConstantIndex, tuple[idx], 10);
+                try self.write(u8, @intCast(constant), line);
+            }
+        }
+    }
+
     pub fn insertLineNumber(self: *Chunk, line: u32) !void {
         const last_opt = self.lines.getLastOrNull();
         if (last_opt) |last| {
@@ -104,7 +111,7 @@ pub const Chunk = struct {
         return std.mem.bytesAsValue(valtype, ptr).*;
     }
 
-    pub fn getLine(self: *Chunk, instruction_index: u32) u32 {
+    pub fn getLine(self: *const Chunk, instruction_index: u32) u32 {
         var counted_instructions: u32 = 0;
         var counted_line_blocks: u32 = 0;
         while (true) {
@@ -113,58 +120,6 @@ pub const Chunk = struct {
                 return self.lines.items[counted_line_blocks].line_number;
             }
             counted_line_blocks += 1;
-        }
-    }
-
-    pub fn disassemble(self: *Chunk, writer: anytype, name: []const u8) !void {
-        _ = try writer.print("== {s} ==\n", .{name});
-        var offset: u32 = 0;
-        while (offset < self.bytes.items.len) {
-            const opcode: OpCode = @enumFromInt(self.bytes.items[offset]);
-
-            const instruction_length = try self.printInstruction(writer, opcode, offset);
-            offset += instruction_length;
-        }
-    }
-
-    fn printInstruction(self: *Chunk, writer: anytype, opcode: OpCode, offset: u32) !u32 {
-        try writer.print("{d:0>4} ", .{offset});
-
-        if (offset > 0 and self.getLine(offset) == self.getLine(offset - 1)) {
-            try writer.print("   | ", .{});
-        } else {
-            try writer.print("{d: >4} ", .{self.getLine(offset)});
-        }
-
-        try writer.print("{s: <16}", .{@tagName(opcode)});
-
-        return switch (opcode) {
-            .op_return => {
-                _ = try writer.print("\n", .{});
-                return 1;
-            },
-            .op_constant => try self.printConstantInstruction(writer, opcode, offset, u8),
-            .op_constant_long => try self.printConstantInstruction(writer, opcode, offset, u24),
-        };
-    }
-    fn printConstantInstruction(self: *Chunk, writer: anytype, opcode: OpCode, offset: u32, constant_type: type) !u32 {
-        const constant: ConstantIndex = if (constant_type == u8) self.bytes.items[offset + 1] else self.read(u24, offset + 1);
-        _ = try writer.print(" {d: >6} ", .{constant});
-
-        try printValue(writer, self.constants.items[constant]);
-        _ = try writer.print("\n", .{});
-
-        return opcode.instructionLen();
-    }
-
-    fn printValue(writer: anytype, val: Value) !void {
-        _ = try writer.print("{d}", .{val});
-    }
-
-    fn dumpConstantPool(self: *const Chunk) void {
-        std.debug.print("---- Constants ----\n", .{});
-        for (self.constants.items, 0..) |constant, i| {
-            std.debug.print("  {}:  {}\n", .{ i, constant });
         }
     }
 };
