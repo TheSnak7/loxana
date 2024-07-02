@@ -37,7 +37,8 @@ pub fn printInstruction(self: *const Chunk, writer: anytype, offset: u32) !u32 {
     };
 }
 pub fn printConstantInstruction(self: *const Chunk, writer: anytype, opcode: OpCode, offset: u32, constant_type: type) !u32 {
-    const constant: ConstantIndex = if (constant_type == u8) self.bytes.items[offset + 1] else self.read(u24, offset + 1);
+    _ = constant_type;
+    const constant: ConstantIndex = self.bytes.items[offset + 1];
     _ = try writer.print(" {d: >6} ", .{constant});
 
     try printValue(writer, self.constants.items[constant]);

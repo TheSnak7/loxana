@@ -3,6 +3,7 @@ const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("opcode.zig").OpCode;
 const Value = @import("value.zig").Value;
 const Config = @import("config.zig");
+const Parser = @import("Parser.zig");
 
 const DebugWriter = struct {
     pub fn print(comptime fmt: []const u8, args: anytype) !void {
@@ -10,7 +11,7 @@ const DebugWriter = struct {
     }
 };
 
-const Self = @This();
+const VM = @This();
 
 chunk: *Chunk = undefined,
 // FIXME: replace with pointer arithmetic
@@ -32,52 +33,63 @@ pub const InterpretResult = union(InterpretResultTag) {
     runtime_error: i32,
 };
 
-pub fn init(alloc: std.mem.Allocator) Self {
+pub fn init(alloc: std.mem.Allocator) VM {
     return .{
         .alloc = alloc,
     };
 }
 
-fn resetVM(self: *Self) void {
+fn resetVM(self: *VM) void {
     self.resetStack();
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *VM) void {
     _ = self;
 }
 
-fn resetStack(self: *Self) void {
+fn resetStack(self: *VM) void {
     self.stack_top = 0;
 }
 
-//This function should wrap all errors
-pub fn interpret(self: *Self, chunk: *Chunk) !InterpretResult {
-    self.chunk = chunk;
+pub fn interpret(self: *VM, alloc: std.mem.Allocator, src: []const u8) !VM.InterpretResult {
+    var chunk = try Chunk.init(alloc);
+    defer chunk.deinit();
+
+    //FIXME: super hacky
+    var parser: Parser = undefined;
+
+    if (!(try parser.compile(src, &chunk))) {
+        return InterpretResult{ .compile_error = 99 };
+    }
+
+    self.chunk = &chunk;
     self.ip = 0;
 
-    return runCode(self);
+    const result = self.runCode();
+
+    return result;
 }
 
-inline fn push(self: *Self, val: Value) void {
+inline fn push(self: *VM, val: Value) void {
     self.stack[self.stack_top] = val;
     self.stack_top += 1;
 }
-inline fn pop(self: *Self) Value {
+inline fn pop(self: *VM) Value {
     self.stack_top -= 1;
     return self.stack[self.stack_top];
 }
 
-inline fn readByte(self: *Self) u8 {
+inline fn readByte(self: *VM) u8 {
     const ret = self.chunk.bytes.items[self.ip];
     self.ip += 1;
     return ret;
 }
 
-inline fn readConstant(self: *Self) Value {
+inline fn readConstant(self: *VM) Value {
     return self.chunk.constants.items[self.readByte()];
 }
 
-fn runCode(self: *Self) !InterpretResult {
+fn runCode(self: *VM) !InterpretResult {
     while (true) {
         if (Config.debug_trace_exectution) {
             std.debug.print("          ", .{});

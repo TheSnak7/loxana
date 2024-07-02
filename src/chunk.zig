@@ -6,7 +6,7 @@ const Debug = @import("debug.zig");
 pub const Chunk = struct {
     pub usingnamespace Debug;
 
-    pub const ConstantIndex = u24;
+    pub const ConstantIndex = u8;
     const Line = struct {
         intruction_count: u32,
         line_number: u32,
@@ -41,6 +41,12 @@ pub const Chunk = struct {
     }
 
     pub fn write(self: *Chunk, valtype: type, val: valtype, line: u32) !void {
+        if (valtype == u8) {
+            try self.bytes.append(val);
+            try self.insertLineNumber(line);
+            return;
+        }
+
         const size = switch (valtype) {
             u8, i8 => 1,
             u16, i16 => 2,
@@ -98,12 +104,9 @@ pub const Chunk = struct {
         }
     }
 
-    pub fn addConstant(self: *Chunk, val: Value) !ConstantIndex {
+    pub fn addConstant(self: *Chunk, val: Value) !usize {
         try self.constants.append(val);
-        if (self.constants.items.len > std.math.maxInt(ConstantIndex)) {
-            @panic("Exceeded constant pool");
-        }
-        return @intCast(self.constants.items.len - 1);
+        return self.constants.items.len - 1;
     }
 
     pub fn read(self: *const Chunk, valtype: type, first_byte_index: u32) valtype {

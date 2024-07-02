@@ -3,7 +3,7 @@ const clap = @import("clap");
 const safeUnreachable = @import("util.zig").safeUnreachable;
 const Chunk = @import("chunk.zig").Chunk;
 const VM = @import("vm.zig");
-const compile = @import("compiler.zig").compile;
+const interpret = VM.interpret;
 
 //var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 //defer std.debug.assert(general_purpose_allocator.deinit() == .ok);
@@ -43,7 +43,7 @@ pub fn main() !void {
     if (res.positionals.len == 0) {
         const stdin = std.io.getStdIn().reader();
         const stdout = std.io.getStdOut().writer();
-        try repl(stdout, stdin);
+        try repl(gpa, stdout, stdin);
     }
 
     for (res.positionals) |pos| {
@@ -56,31 +56,30 @@ fn printHelp() void {
 }
 
 var lineBuf: [1024]u8 = undefined;
-fn repl(stdout: anytype, stdin: anytype) !void {
+fn repl(alloc: std.mem.Allocator, stdout: anytype, stdin: anytype) !void {
+    var vm = VM.init(alloc);
+
     while (true) {
         try stdout.print("> ", .{});
         const line = try stdin.readUntilDelimiterOrEof(&lineBuf, '\n') orelse {
             @panic("Unexpected null bytes read");
         };
-        _ = try interpret(line);
+        _ = try vm.interpret(alloc, line);
     }
 }
 
 fn runFile(alloc: std.mem.Allocator, path: []const u8) !void {
     const file = try std.fs.cwd().readFileAlloc(alloc, path, 1000_000_000);
 
-    const result = try interpret(file);
+    var vm = VM.init(alloc);
+
+    const result = try vm.interpret(alloc, file);
 
     switch (result) {
         .compile_error => std.process.exit(65),
         .runtime_error => std.process.exit(70),
         .ok => return,
     }
-}
-
-fn interpret(src: []const u8) !VM.InterpretResult {
-    try compile(src);
-    return VM.InterpretResult.ok;
 }
 
 test "run all tests" {

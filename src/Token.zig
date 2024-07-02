@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub const Token = struct {
     tag: Tag,
-    name: []const u8,
+    lexeme: []const u8,
     line: u32,
 
     pub const Tag = enum {
@@ -78,14 +78,14 @@ pub const Token = struct {
     }
 
     pub fn format(value: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        return writer.print("<Token \"{s}\" ({s}) at line {}>", .{ value.name, @tagName(value.tag), value.line });
+        return writer.print("<Token \"{s}\" ({s}) at line {}>", .{ value.lexeme, @tagName(value.tag), value.line });
     }
 
     pub fn debugFormat(value: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        return writer.print("<Token \"{s}\" ({s}) at line {}>\n", .{ value.name, @tagName(value.tag), value.line });
+        return writer.print("<Token \"{s}\" ({s}) at line {}>\n", .{ value.lexeme, @tagName(value.tag), value.line });
     }
 
     pub fn toString(value: @This(), alloc: std.mem.Allocator) ![]const u8 {
-        return try std.fmt.allocPrint(alloc, "<Token \"{s}\" ({s}) at line {}>", .{ value.name, @tagName(value.tag), value.line });
+        return try std.fmt.allocPrint(alloc, "<Token \"{s}\" ({s}) at line {}>", .{ value.lexeme, @tagName(value.tag), value.line });
     }
 };

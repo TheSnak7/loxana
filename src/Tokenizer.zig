@@ -1,6 +1,5 @@
 const std = @import("std");
-const Token = @import("token.zig").Token;
-const pretty = @import("pretty.zig");
+const Token = @import("Token.zig").Token;
 const Self = @This();
 
 //Convert to pointers
@@ -17,7 +16,7 @@ pub fn init(src: []const u8) Self {
     };
 }
 
-pub fn scanToken(self: *Self) Token {
+pub fn next(self: *Self) Token {
     self.skipWhitespace();
     self.text = self.text[self.current..];
     self.current = 0;
@@ -142,7 +141,7 @@ fn checkKeyword(self: *Self, offset: usize, rest: []const u8, token_type: Token.
 fn makeToken(self: *Self, tag: Token.Tag) Token {
     return .{
         .tag = tag,
-        .name = self.text[0..(self.current)],
+        .lexeme = self.text[0..(self.current)],
         .line = @intCast(self.line),
     };
 }
@@ -150,7 +149,7 @@ fn makeToken(self: *Self, tag: Token.Tag) Token {
 fn errorToken(self: *Self, message: []const u8) Token {
     return .{
         .tag = .invalid,
-        .name = message,
+        .lexeme = message,
         .line = self.line,
     };
 }
@@ -183,7 +182,7 @@ fn parseTestTokens(alloc: std.mem.Allocator, src: []const u8) !std.ArrayList(Tok
     var tokenizer = Self.init(src);
 
     while (true) {
-        const token = tokenizer.scanToken();
+        const token = tokenizer.next();
         try tokens.append(token);
         if (token.tag == .eof) {
             break;
@@ -196,7 +195,7 @@ test "plus token" {
     var tokenizer = Self.init("+");
     const correct_token = createTestToken("+", .plus);
 
-    const token = tokenizer.scanToken();
+    const token = tokenizer.next();
 
     _ = try std.testing.expectEqualDeep(correct_token, token);
 }
@@ -205,7 +204,7 @@ test "eof token" {
     var tokenizer = Self.init("");
     const correct_token = createTestToken("", .eof);
 
-    const token = tokenizer.scanToken();
+    const token = tokenizer.next();
 
     _ = try std.testing.expectEqualDeep(correct_token, token);
 }
