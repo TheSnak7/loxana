@@ -1,7 +1,7 @@
 const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("opcode.zig").OpCode;
-const Value = @import("value.zig").Value;
+const Value = @import("Value.zig").Value;
 const Config = @import("config.zig");
 const Parser = @import("Parser.zig");
 
@@ -79,6 +79,10 @@ inline fn pop(self: *VM) Value {
     return self.stack[self.stack_top];
 }
 
+inline fn peek(self: *VM, distance: usize) Value {
+    return self.stack[self.stack_top - distance - 1];
+}
+
 inline fn readByte(self: *VM) u8 {
     const ret = self.chunk.bytes.items[self.ip];
     self.ip += 1;
@@ -115,32 +119,81 @@ fn runCode(self: *VM) !InterpretResult {
                 std.debug.print("\n", .{});
                 return InterpretResult.ok;
             },
-            .add => {
+            .nil => self.push(Value.getNil()),
+            .op_true => self.push(Value.fromBool(true)),
+            .op_false => self.push(Value.fromBool(false)),
+            .equal => {
                 const b = self.pop();
                 const a = self.pop();
-                self.push(a + b);
+                self.push(Value.fromBool(Value.areEqual(a, b)));
+            },
+            .not => self.push(Value.fromBool(self.pop().isFalsey())),
+            .add => {
+                if (!self.twoNumsOnTop()) return InterpretResult{ .runtime_error = 33 };
+                const b = self.pop().number;
+                const a = self.pop().number;
+                self.push(Value{ .number = a + b });
             },
             .subtract => {
-                const b = self.pop();
-                const a = self.pop();
-                self.push(a - b);
+                if (!self.twoNumsOnTop()) return InterpretResult{ .runtime_error = 33 };
+                const b = self.pop().number;
+                const a = self.pop().number;
+                self.push(Value{ .number = a - b });
             },
             .multiply => {
-                const b = self.pop();
-                const a = self.pop();
-                self.push(a * b);
+                if (!self.twoNumsOnTop()) return InterpretResult{ .runtime_error = 33 };
+                const b = self.pop().number;
+                const a = self.pop().number;
+                self.push(Value{ .number = a * b });
             },
             .divide => {
-                const b = self.pop();
-                const a = self.pop();
-                self.push(a / b);
+                if (!self.twoNumsOnTop()) return InterpretResult{ .runtime_error = 33 };
+                const b = self.pop().number;
+                const a = self.pop().number;
+                self.push(Value{ .number = a / b });
+            },
+            .greater => {
+                if (!self.twoNumsOnTop()) return InterpretResult{ .runtime_error = 33 };
+                const b = self.pop().number;
+                const a = self.pop().number;
+                self.push(Value.fromBool(a > b));
+            },
+            .less => {
+                if (!self.twoNumsOnTop()) return InterpretResult{ .runtime_error = 33 };
+                const b = self.pop().number;
+                const a = self.pop().number;
+                self.push(Value.fromBool(a < b));
             },
             .negate => {
-                self.push(-self.pop());
+                switch (self.peek(0)) {
+                    .number => self.push(Value{ .number = -self.pop().number }),
+                    else => {
+                        self.runtimeError("Operand must be a number", .{});
+                        return InterpretResult{ .runtime_error = 33 };
+                    },
+                }
             },
             .constant_long => {
                 @panic("Unsupported instruction: op-c-long");
             },
         }
     }
+}
+
+inline fn twoNumsOnTop(self: *VM) bool {
+    if (!self.peek(0).isNumber() or !self.peek(1).isNumber()) {
+        self.runtimeError("Operand must be numbers.", .{});
+        return false;
+    }
+    return true;
+}
+
+fn runtimeError(self: *VM, comptime format: []const u8, args: anytype) void {
+    std.debug.print(format, args);
+    std.debug.print("\n", .{});
+
+    const instruction = self.ip - 1;
+    const line = self.chunk.getLine(instruction);
+    std.debug.print("[line {}] in script\n", .{line});
+    self.resetStack();
 }

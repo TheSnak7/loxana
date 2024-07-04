@@ -1,5 +1,5 @@
 const std = @import("std");
-const Value = @import("value.zig").Value;
+const Value = @import("Value.zig").Value;
 const OpCode = @import("opcode.zig").OpCode;
 const Debug = @import("debug.zig");
 

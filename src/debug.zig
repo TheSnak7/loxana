@@ -1,5 +1,5 @@
 const std = @import("std");
-const Value = @import("value.zig").Value;
+const Value = @import("Value.zig").Value;
 const OpCode = @import("opcode.zig").OpCode;
 const ch = @import("chunk.zig");
 const Chunk = ch.Chunk;
@@ -28,7 +28,20 @@ pub fn printInstruction(self: *const Chunk, writer: anytype, offset: u32) !u32 {
     try writer.print("{s: <16}", .{@tagName(opcode)});
 
     return switch (opcode) {
-        .ret, .negate, .add, .subtract, .multiply, .divide => {
+        .ret,
+        .negate,
+        .add,
+        .subtract,
+        .multiply,
+        .divide,
+        .nil,
+        .op_false,
+        .op_true,
+        .not,
+        .equal,
+        .greater,
+        .less,
+        => {
             _ = try writer.print("\n", .{});
             return 1;
         },
@@ -48,7 +61,7 @@ pub fn printConstantInstruction(self: *const Chunk, writer: anytype, opcode: OpC
 }
 
 pub fn printValue(writer: anytype, val: Value) !void {
-    _ = try writer.print("{d}", .{val});
+    _ = try writer.print("{any}", .{val});
 }
 
 pub fn dumpConstantPool(self: *const Chunk) void {

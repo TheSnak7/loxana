@@ -1,7 +1,7 @@
 const std = @import("std");
 const Tokenizer = @import("tokenizer.zig");
 const Chunk = @import("chunk.zig").Chunk;
-const Value = @import("value.zig").Value;
+const Value = @import("Value.zig").Value;
 const Token = @import("Token.zig").Token;
 const OpCode = @import("opcode.zig").OpCode;
 const Config = @import("config.zig");
@@ -176,7 +176,12 @@ fn orFn(self: *Parser) !void {
 }
 
 fn literal(self: *Parser) !void {
-    _ = self;
+    switch (self.previous.tag) {
+        .keyword_false => try self.emitOp(.op_false),
+        .keyword_true => try self.emitOp(.op_true),
+        .keyword_nil => try self.emitOp(.nil),
+        else => safeUnreachable(@src()),
+    }
 }
 
 fn super(self: *Parser) !void {
@@ -198,6 +203,12 @@ fn binary(self: *Parser) !void {
     try self.parsePrecedence(rule.precedence.next());
 
     switch (operator_tag) {
+        .bang_equal => try self.emitOps(.equal, .not),
+        .equal_equal => try self.emitOp(.equal),
+        .greater => try self.emitOp(.greater),
+        .greater_equal => try self.emitOps(.less, .not),
+        .less => try self.emitOp(.less),
+        .less_equal => try self.emitOps(.greater, .not),
         .plus => try self.emitOp(.add),
         .minus => try self.emitOp(.subtract),
         .star => try self.emitOp(.multiply),
@@ -213,13 +224,14 @@ fn unary(self: *Parser) !void {
 
     switch (operator_tag) {
         .minus => try self.emitOp(.negate),
+        .bang => try self.emitOp(.not),
         else => safeUnreachable(@src()),
     }
 }
 
 fn number(self: *Parser) !void {
-    const value = try std.fmt.parseFloat(Value, self.previous.lexeme);
-    try self.emitConstant(value);
+    const value = try std.fmt.parseFloat(f64, self.previous.lexeme);
+    try self.emitConstant(Value{ .number = value });
 }
 
 fn errorAtCurrent(self: *Parser, message: []const u8) void {
@@ -271,6 +283,11 @@ fn emitBytes(self: *Parser, byte1: u8, byte2: u8) void {
 
 fn emitOp(self: *Parser, opcode: OpCode) !void {
     try self.currentChunk().writeOp(opcode, self.previous.line);
+}
+
+fn emitOps(self: *Parser, op1: OpCode, op2: OpCode) !void {
+    try self.currentChunk().writeOp(op1, self.previous.line);
+    try self.currentChunk().writeOp(op2, self.previous.line);
 }
 
 fn emitReturn(self: *Parser) !void {
