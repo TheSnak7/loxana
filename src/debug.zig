@@ -41,11 +41,17 @@ pub fn printInstruction(self: *const Chunk, writer: anytype, offset: u32) !u32 {
         .equal,
         .greater,
         .less,
+        .print,
+        .pop,
         => {
             _ = try writer.print("\n", .{});
             return 1;
         },
-        .constant => try self.printConstantInstruction(writer, opcode, offset, u8),
+        .get_global,
+        .define_global,
+        .set_global,
+        .constant,
+        => try self.printConstantInstruction(writer, opcode, offset, u8),
         .constant_long => try self.printConstantInstruction(writer, opcode, offset, u24),
     };
 }

@@ -68,6 +68,14 @@ pub const Value = union(Tag) {
         return value.isNil() or (value.isBool() and !value.boolean);
     }
 
+    pub inline fn asObj(value: *const Value) *Object {
+        return value.object;
+    }
+
+    pub inline fn asString(value: *const Value) *Object.String {
+        return value.asObj().asString();
+    }
+
     pub inline fn areEqual(a: Value, b: Value) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
 

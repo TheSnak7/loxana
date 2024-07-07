@@ -14,6 +14,11 @@ pub const OpCode = enum(u8) {
     equal,
     greater,
     less,
+    print,
+    pop,
+    get_global,
+    define_global,
+    set_global,
 
     pub fn instructionLen(self: OpCode) u8 {
         return switch (self) {
@@ -30,8 +35,14 @@ pub const OpCode = enum(u8) {
             .equal,
             .greater,
             .less,
+            .print,
+            .pop,
             => 1,
-            .constant => 2,
+            .define_global,
+            .constant,
+            .get_global,
+            .set_global,
+            => 2,
             .constant_long => 4,
         };
     }

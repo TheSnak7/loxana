@@ -20,6 +20,7 @@ pub const VM = struct {
     //FIXME: replace with pointer arithmetic
     stack_top: u32 = 0,
     strings: std.StringHashMap(*Object.String),
+    globals: std.AutoHashMap(*Object.String, Value),
     alloc: std.mem.Allocator,
     objects: ?*Object,
 
@@ -37,10 +38,12 @@ pub const VM = struct {
 
     pub fn init(alloc: std.mem.Allocator) VM {
         const strings = std.StringHashMap(*Object.String).init(alloc);
+        const globals = std.AutoHashMap(*Object.String, Value).init(alloc);
         return .{
             .alloc = alloc,
             .objects = null,
             .strings = strings,
+            .globals = globals,
         };
     }
 
@@ -52,6 +55,7 @@ pub const VM = struct {
         std.debug.print("Running cleanup\n", .{});
         self.freeObjects();
         self.strings.deinit();
+        self.globals.deinit();
     }
 
     fn freeObjects(self: *VM) void {
@@ -119,6 +123,10 @@ pub const VM = struct {
         return self.chunk.constants.items[self.readByte()];
     }
 
+    inline fn readString(self: *VM) *Object.String {
+        return self.readConstant().asString();
+    }
+
     fn runCode(self: *VM) !InterpretResult {
         while (true) {
             if (Config.debug_trace_exectution) {
@@ -134,20 +142,44 @@ pub const VM = struct {
             const opcode: OpCode = @enumFromInt(self.readByte());
 
             // Implementation of instructions follows the book for now
-            // FIXME: Improve performance when simple compiler and benchmarking is available
+            // TODO: Improve performance when simple compiler and benchmarking is available
             switch (opcode) {
                 .constant => {
                     const constant = self.readConstant();
                     self.push(constant);
                 },
                 .ret => {
-                    _ = try Chunk.printValue(DebugWriter, self.pop());
-                    std.debug.print("\n", .{});
                     return InterpretResult.ok;
                 },
                 .nil => self.push(Value.getNil()),
                 .op_true => self.push(Value.fromBool(true)),
                 .op_false => self.push(Value.fromBool(false)),
+                .pop => _ = self.pop(),
+                .get_global => {
+                    const name = self.readString();
+                    const value = self.globals.get(name);
+                    if (value) |v| {
+                        self.push(v);
+                    } else {
+                        self.runtimeError("Undefined variable '{s}'.", .{name.bytes});
+                        return InterpretResult{ .runtime_error = 33 };
+                    }
+                },
+                .define_global => {
+                    const name = self.readString();
+                    const val = self.peek(0);
+                    try self.globals.put(name, val);
+                    _ = self.pop();
+                },
+                .set_global => {
+                    const name = self.readString();
+                    const value = self.peek(0);
+                    if (self.globals.get(name) == null) {
+                        self.runtimeError("Undefined variable '{s}'.", .{name.bytes});
+                        return InterpretResult{ .runtime_error = 33 };
+                    }
+                    try self.globals.put(name, value);
+                },
                 .equal => {
                     const b = self.pop();
                     const a = self.pop();
@@ -204,6 +236,11 @@ pub const VM = struct {
                             return InterpretResult{ .runtime_error = 33 };
                         },
                     }
+                },
+                .print => {
+                    //TODO: Add standard and error Writers to vm
+                    const stdout = std.io.getStdOut().writer();
+                    try stdout.print("{}\n", .{self.pop()});
                 },
                 .constant_long => {
                     @panic("Unsupported instruction: op-c-long");

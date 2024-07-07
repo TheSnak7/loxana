@@ -42,7 +42,7 @@ const Precedence = enum(u8) {
     }
 };
 
-const ParseFn = *const fn (self: *Parser) anyerror!void;
+const ParseFn = *const fn (self: *Parser, canAssign: bool) anyerror!void;
 
 const Rule = struct {
     prefix: ?ParseFn,
@@ -112,8 +112,9 @@ pub fn compile(self: *Parser, vm: *VM, src: []const u8, chunk: *Chunk) !bool {
     self.compiling_chunk = chunk;
 
     self.advance();
-    try self.expression();
-    self.consume(.eof, "Expected end of expression");
+    while (!self.match(.eof)) {
+        try self.declaration();
+    }
     try self.endCompiler();
     return !self.had_error;
 }
@@ -137,49 +138,139 @@ fn consume(self: *Parser, tag: Token.Tag, message: []const u8) void {
     self.errorAtCurrent(message);
 }
 
+fn match(self: *Parser, tag: Token.Tag) bool {
+    if (!self.check(tag)) return false;
+    self.advance();
+    return true;
+}
+
+fn check(self: *Parser, tag: Token.Tag) bool {
+    return self.current.tag == tag;
+}
+
+fn declaration(self: *Parser) !void {
+    if (self.match(.keyword_var)) {
+        try self.varDeclaration();
+    } else {
+        try self.statement();
+    }
+
+    if (self.panic_mode) self.synchronize();
+}
+
+fn statement(self: *Parser) !void {
+    if (self.match(.keyword_print)) {
+        try self.printStatement();
+    } else {
+        try self.expressionStatement();
+    }
+}
+
+fn printStatement(self: *Parser) !void {
+    try self.expression();
+    self.consume(.semicolon, "Expect ';' after value.");
+    try self.emitOp(.print);
+}
+
+fn expressionStatement(self: *Parser) !void {
+    try self.expression();
+    self.consume(.semicolon, "Expect ';' after expression.");
+    try self.emitOp(.pop);
+}
+
 fn expression(self: *Parser) !void {
     try self.parsePrecedence(.assignment);
 }
 
+fn varDeclaration(self: *Parser) !void {
+    const global = try self.parseVariable("Expect variable name.");
+
+    if (self.match(.equal)) {
+        try self.expression();
+    } else {
+        try self.emitOp(.nil);
+    }
+
+    self.consume(.semicolon, "Expect ';' after variable declartion.");
+
+    try self.defineVariable(global);
+}
+
 fn parsePrecedence(self: *Parser, precedence: Precedence) !void {
     self.advance();
-    const prefix = getRule(self.previous.tag).prefix;
-    if (prefix) |p| {
-        try p(self);
-
-        while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.current.tag).precedence)) {
-            self.advance();
-            const infix = getRule(self.previous.tag).infix;
-            if (infix) |ifx| {
-                try ifx(self);
-            } else {
-                safeUnreachable(@src());
-            }
-        }
-    } else {
+    const prefix = getRule(self.previous.tag).prefix orelse {
         self.errorAtPrevious("Expect expression.");
         return;
+    };
+    const canAssign = @intFromEnum(precedence) <= @intFromEnum(Precedence.assignment);
+
+    try prefix(self, canAssign);
+
+    while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.current.tag).precedence)) {
+        self.advance();
+        const infix = getRule(self.previous.tag).infix;
+        if (infix) |ifx| {
+            try ifx(self, canAssign);
+        } else {
+            safeUnreachable(@src());
+        }
+    }
+
+    if (canAssign and self.match(.equal)) {
+        self.errorAtPrevious("Invalid assignment target.");
     }
 }
 
-fn variable(self: *Parser) !void {
-    _ = self;
+fn identifierConstant(self: *Parser, token: Token) !u8 {
+    const str = try Object.String.copy(self.vm, token.lexeme);
+    return self.makeConstant(str.obj.asValue());
 }
 
-fn string(self: *Parser) !void {
+fn parseVariable(self: *Parser, error_message: []const u8) !u8 {
+    self.consume(.identifier, error_message);
+    return try self.identifierConstant(self.previous);
+}
+
+fn defineVariable(self: *Parser, global: u8) !void {
+    try self.emitOp(.define_global);
+    try self.emitByte(global);
+}
+
+fn variable(self: *Parser, canAssign: bool) !void {
+    try self.namedVariable(self.previous, canAssign);
+}
+
+fn string(self: *Parser, canAssign: bool) !void {
+    _ = canAssign;
     const str = try Object.String.copy(self.vm, self.previous.lexeme);
     try self.emitConstant(str.obj.asValue());
 }
 
-fn andFn(self: *Parser) !void {
-    _ = self;
+fn namedVariable(self: *Parser, token: Token, canAssign: bool) !void {
+    const arg = try self.identifierConstant(token);
+
+    if (canAssign and self.match(.equal)) {
+        try self.expression();
+        try self.emitOp(.set_global);
+        try self.emitByte(arg);
+    } else {
+        try self.emitOp(.get_global);
+        try self.emitByte(arg);
+    }
 }
 
-fn orFn(self: *Parser) !void {
+fn andFn(self: *Parser, canAssign: bool) !void {
     _ = self;
+    _ = canAssign;
 }
 
-fn literal(self: *Parser) !void {
+fn orFn(self: *Parser, canAssign: bool) !void {
+    _ = self;
+    _ = canAssign;
+}
+
+fn literal(self: *Parser, canAssign: bool) !void {
+    _ = canAssign;
     switch (self.previous.tag) {
         .keyword_false => try self.emitOp(.op_false),
         .keyword_true => try self.emitOp(.op_true),
@@ -188,20 +279,24 @@ fn literal(self: *Parser) !void {
     }
 }
 
-fn super(self: *Parser) !void {
+fn super(self: *Parser, canAssign: bool) !void {
     _ = self;
+    _ = canAssign;
 }
 
-fn this(self: *Parser) !void {
+fn this(self: *Parser, canAssign: bool) !void {
     _ = self;
+    _ = canAssign;
 }
 
-fn grouping(self: *Parser) !void {
+fn grouping(self: *Parser, canAssign: bool) !void {
+    _ = canAssign;
     try self.expression();
     self.consume(.right_paren, "Expected ')' after expression.");
 }
 
-fn binary(self: *Parser) !void {
+fn binary(self: *Parser, canAssign: bool) !void {
+    _ = canAssign;
     const operator_tag = self.previous.tag;
     const rule = getRule(operator_tag);
     try self.parsePrecedence(rule.precedence.next());
@@ -221,7 +316,8 @@ fn binary(self: *Parser) !void {
     }
 }
 
-fn unary(self: *Parser) !void {
+fn unary(self: *Parser, canAssign: bool) !void {
+    _ = canAssign;
     const operator_tag = self.previous.tag;
 
     try self.parsePrecedence(.unary);
@@ -233,9 +329,32 @@ fn unary(self: *Parser) !void {
     }
 }
 
-fn number(self: *Parser) !void {
+fn number(self: *Parser, canAssign: bool) !void {
+    _ = canAssign;
     const value = try std.fmt.parseFloat(f64, self.previous.lexeme);
     try self.emitConstant(Value{ .number = value });
+}
+
+fn synchronize(self: *Parser) void {
+    self.panic_mode = false;
+    while (self.current.tag != .eof) {
+        if (self.previous.tag == .semicolon) return;
+        switch (self.current.tag) {
+            .keyword_class,
+            .keyword_fun,
+            .keyword_var,
+            .keyword_for,
+            .keyword_if,
+            .keyword_while,
+            .keyword_print,
+            .keyword_return,
+            => return,
+
+            else => {},
+        }
+
+        self.advance();
+    }
 }
 
 fn errorAtCurrent(self: *Parser, message: []const u8) void {
