@@ -5,6 +5,8 @@ const Value = @import("Value.zig").Value;
 const Token = @import("Token.zig").Token;
 const OpCode = @import("opcode.zig").OpCode;
 const Config = @import("config.zig");
+const Object = @import("Object.zig");
+const VM = @import("VM.zig").VM;
 const safeUnreachable = @import("util.zig").safeUnreachable;
 const Parser = @This();
 
@@ -20,6 +22,7 @@ tokenizer: Tokenizer,
 had_error: bool,
 panic_mode: bool,
 compiling_chunk: *Chunk,
+vm: *VM,
 
 const Precedence = enum(u8) {
     none,
@@ -100,9 +103,9 @@ fn createRule(prefix: ?ParseFn, infix: ?ParseFn, precedence: Precedence) Rule {
     };
 }
 
-pub fn compile(self: *Parser, src: []const u8, chunk: *Chunk) !bool {
+pub fn compile(self: *Parser, vm: *VM, src: []const u8, chunk: *Chunk) !bool {
     self.tokenizer = Tokenizer.init(src);
-
+    self.vm = vm;
     self.had_error = false;
     self.panic_mode = false;
 
@@ -164,7 +167,8 @@ fn variable(self: *Parser) !void {
 }
 
 fn string(self: *Parser) !void {
-    _ = self;
+    const str = try Object.String.copy(self.vm, self.previous.lexeme);
+    try self.emitConstant(str.obj.asValue());
 }
 
 fn andFn(self: *Parser) !void {

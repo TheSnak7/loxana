@@ -2,7 +2,7 @@ const std = @import("std");
 const clap = @import("clap");
 const safeUnreachable = @import("util.zig").safeUnreachable;
 const Chunk = @import("chunk.zig").Chunk;
-const VM = @import("vm.zig");
+const VM = @import("VM.zig").VM;
 const interpret = VM.interpret;
 
 //var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -64,6 +64,11 @@ fn repl(alloc: std.mem.Allocator, stdout: anytype, stdin: anytype) !void {
         const line = try stdin.readUntilDelimiterOrEof(&lineBuf, '\n') orelse {
             @panic("Unexpected null bytes read");
         };
+        const is_exit = std.mem.startsWith(u8, line, "exit");
+        if (is_exit) {
+            vm.deinit();
+            return;
+        }
         _ = try vm.interpret(alloc, line);
     }
 }

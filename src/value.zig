@@ -1,21 +1,29 @@
 const std = @import("std");
+const Object = @import("Object.zig");
 
 pub const Tag = enum {
     boolean,
     nil,
     number,
+    object,
 };
 
 pub const Value = union(Tag) {
     boolean: bool,
     nil: void,
     number: f64,
+    object: *Object,
 
     pub fn format(value: Value, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (value) {
-            .number => try writer.print("{d}", .{value.number}),
+            .number => |num| try writer.print("{d}", .{num}),
             .nil => try writer.print("nil", .{}),
-            .boolean => try writer.print("{s}", .{if (value.boolean) "true" else "false"}),
+            .boolean => |b| try writer.print("{s}", .{if (b) "true" else "false"}),
+            .object => |obj| {
+                switch (obj.tag) {
+                    .string => try writer.print("\"{s}\"", .{obj.asString().bytes}),
+                }
+            },
         }
         return;
     }
@@ -32,6 +40,10 @@ pub const Value = union(Tag) {
         return Value{ .number = num };
     }
 
+    pub inline fn fromObject(obj: *Object) Value {
+        return Value{ .object = obj };
+    }
+
     pub inline fn isNumber(value: *const Value) bool {
         return std.meta.activeTag(value.*) == .number;
     }
@@ -42,6 +54,14 @@ pub const Value = union(Tag) {
 
     pub inline fn isNil(value: *const Value) bool {
         return std.meta.activeTag(value.*) == .nil;
+    }
+
+    pub inline fn isObject(value: *const Value) bool {
+        return std.meta.activeTag(value.*) == .object;
+    }
+
+    pub inline fn isString(value: *const Value) bool {
+        return Object.isObjType(value, .string);
     }
 
     pub inline fn isFalsey(value: *const Value) bool {
@@ -55,6 +75,7 @@ pub const Value = union(Tag) {
             .boolean => a.boolean == b.boolean,
             .nil => true,
             .number => a.number == b.number,
+            .object => a.object == b.object,
         };
     }
 };

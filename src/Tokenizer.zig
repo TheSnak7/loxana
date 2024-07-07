@@ -105,7 +105,7 @@ fn string(self: *Self) Token {
     if (self.isAtEnd()) return self.errorToken("Unterminated string");
 
     self.advance();
-    return self.makeToken(.string);
+    return self.makeString(self.text[1 .. self.current - 1]);
 }
 
 fn number(self: *Self) Token {
@@ -142,6 +142,14 @@ fn makeToken(self: *Self, tag: Token.Tag) Token {
     return .{
         .tag = tag,
         .lexeme = self.text[0..(self.current)],
+        .line = @intCast(self.line),
+    };
+}
+
+fn makeString(self: *Self, lexeme: []const u8) Token {
+    return .{
+        .tag = .string,
+        .lexeme = lexeme,
         .line = @intCast(self.line),
     };
 }
