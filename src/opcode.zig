@@ -16,8 +16,10 @@ pub const OpCode = enum(u8) {
     less,
     print,
     pop,
+    get_local,
     get_global,
     define_global,
+    set_local,
     set_global,
 
     pub fn instructionLen(self: OpCode) u8 {
@@ -42,6 +44,8 @@ pub const OpCode = enum(u8) {
             .constant,
             .get_global,
             .set_global,
+            .set_local,
+            .get_local,
             => 2,
             .constant_long => 4,
         };

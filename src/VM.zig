@@ -4,7 +4,9 @@ const OpCode = @import("opcode.zig").OpCode;
 const Value = @import("Value.zig").Value;
 const Object = @import("Object.zig");
 const Config = @import("config.zig");
-const Parser = @import("Parser.zig");
+const sp = @import("spcompiler.zig");
+const Parser = sp.Parser;
+const CompilationContext = sp.CompilationContext;
 
 const DebugWriter = struct {
     pub fn print(comptime fmt: []const u8, args: anytype) !void {
@@ -85,10 +87,10 @@ pub const VM = struct {
         var chunk = try Chunk.init(alloc);
         defer chunk.deinit();
 
-        //FIXME: super hacky
-        var parser: Parser = undefined;
+        var context = CompilationContext.init(self);
+        defer context.deinit();
 
-        if (!(try parser.compile(self, src, &chunk))) {
+        if (!(try context.compile(src, &chunk))) {
             return InterpretResult{ .compile_error = 99 };
         }
 
@@ -155,6 +157,15 @@ pub const VM = struct {
                 .op_true => self.push(Value.fromBool(true)),
                 .op_false => self.push(Value.fromBool(false)),
                 .pop => _ = self.pop(),
+                .get_local => {
+                    const slot = self.readByte();
+                    const local = self.stack[slot];
+                    self.push(local);
+                },
+                .set_local => {
+                    const slot = self.readByte();
+                    self.stack[slot] = self.peek(0);
+                },
                 .get_global => {
                     const name = self.readString();
                     const value = self.globals.get(name);

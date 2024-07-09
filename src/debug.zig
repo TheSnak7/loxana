@@ -52,6 +52,9 @@ pub fn printInstruction(self: *const Chunk, writer: anytype, offset: u32) !u32 {
         .set_global,
         .constant,
         => try self.printConstantInstruction(writer, opcode, offset, u8),
+        .set_local,
+        .get_local,
+        => try self.printByteInstruction(writer, opcode, offset),
         .constant_long => try self.printConstantInstruction(writer, opcode, offset, u24),
     };
 }
@@ -61,6 +64,14 @@ pub fn printConstantInstruction(self: *const Chunk, writer: anytype, opcode: OpC
     _ = try writer.print(" {d: >6} ", .{constant});
 
     try printValue(writer, self.constants.items[constant]);
+    _ = try writer.print("\n", .{});
+
+    return opcode.instructionLen();
+}
+
+pub fn printByteInstruction(self: *const Chunk, writer: anytype, opcode: OpCode, offset: u32) !u8 {
+    const slot = self.bytes.items[@intCast(offset + 1)];
+    try writer.print(" {d: >6}", .{slot});
     _ = try writer.print("\n", .{});
 
     return opcode.instructionLen();
