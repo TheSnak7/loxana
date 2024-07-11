@@ -24,6 +24,7 @@ pub const VM = struct {
     strings: std.StringHashMap(*Object.String),
     globals: std.AutoHashMap(*Object.String, Value),
     alloc: std.mem.Allocator,
+    ext: ExternFuncs,
     objects: ?*Object,
 
     pub const InterpretResultTag = enum {
@@ -38,11 +39,16 @@ pub const VM = struct {
         runtime_error: i32,
     };
 
-    pub fn init(alloc: std.mem.Allocator) VM {
+    pub const ExternFuncs = struct {
+        stdout: std.io.AnyWriter,
+    };
+
+    pub fn init(alloc: std.mem.Allocator, funcs: ExternFuncs) VM {
         const strings = std.StringHashMap(*Object.String).init(alloc);
         const globals = std.AutoHashMap(*Object.String, Value).init(alloc);
         return .{
             .alloc = alloc,
+            .ext = funcs,
             .objects = null,
             .strings = strings,
             .globals = globals,
@@ -54,7 +60,6 @@ pub const VM = struct {
     }
 
     pub fn deinit(self: *VM) void {
-        std.debug.print("Running cleanup\n", .{});
         self.freeObjects();
         self.strings.deinit();
         self.globals.deinit();
@@ -121,6 +126,12 @@ pub const VM = struct {
         return ret;
     }
 
+    inline fn readU16(self: *VM) u16 {
+        const val = std.mem.bytesAsValue(u16, self.chunk.bytes.items[(self.ip)..(self.ip + 2)]).*;
+        self.ip += 2;
+        return val;
+    }
+
     inline fn readConstant(self: *VM) Value {
         return self.chunk.constants.items[self.readByte()];
     }
@@ -152,6 +163,20 @@ pub const VM = struct {
                 },
                 .ret => {
                     return InterpretResult.ok;
+                },
+                .jump => {
+                    const offset = self.readU16();
+                    self.ip += offset;
+                },
+                .jump_if_false => {
+                    const offset = self.readU16();
+                    if (self.peek(0).isFalsey()) {
+                        self.ip += offset;
+                    }
+                },
+                .loop => {
+                    const offset = self.readU16();
+                    self.ip -= offset;
                 },
                 .nil => self.push(Value.getNil()),
                 .op_true => self.push(Value.fromBool(true)),
@@ -249,9 +274,8 @@ pub const VM = struct {
                     }
                 },
                 .print => {
-                    //TODO: Add standard and error Writers to vm
-                    const stdout = std.io.getStdOut().writer();
-                    try stdout.print("{}\n", .{self.pop()});
+                    //TODO: Add error writer to vm
+                    try self.ext.stdout.print("{}\n", .{self.pop()});
                 },
                 .constant_long => {
                     @panic("Unsupported instruction: op-c-long");

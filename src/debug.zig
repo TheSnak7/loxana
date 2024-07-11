@@ -47,6 +47,11 @@ pub fn printInstruction(self: *const Chunk, writer: anytype, offset: u32) !u32 {
             _ = try writer.print("\n", .{});
             return 1;
         },
+        .jump,
+        .jump_if_false,
+        => try self.printJumpInstruction(writer, opcode, 1, offset),
+        .loop,
+        => try self.printJumpInstruction(writer, opcode, -1, offset),
         .get_global,
         .define_global,
         .set_global,
@@ -58,10 +63,24 @@ pub fn printInstruction(self: *const Chunk, writer: anytype, offset: u32) !u32 {
         .constant_long => try self.printConstantInstruction(writer, opcode, offset, u24),
     };
 }
+pub fn printJumpInstruction(self: *const Chunk, writer: anytype, opcode: OpCode, sign: i8, offset: u32) !u32 {
+    std.debug.print("\nOffset: {}\n", .{offset});
+    const jump: i16 = std.mem.bytesAsValue(i16, self.bytes.items[(offset + 1)..(offset + 3)]).*;
+    std.debug.print("ReadJ: {}\n", .{jump});
+
+    try writer.print(" {d} -> {d}", .{
+        offset,
+        @as(i16, @intCast(offset + 3)) + sign * jump,
+    });
+    _ = try writer.print("\n", .{});
+
+    return opcode.instructionLen();
+}
+
 pub fn printConstantInstruction(self: *const Chunk, writer: anytype, opcode: OpCode, offset: u32, constant_type: type) !u32 {
     _ = constant_type;
     const constant: ConstantIndex = self.bytes.items[offset + 1];
-    _ = try writer.print(" {d: >6} ", .{constant});
+    _ = try writer.print(" [{d}] ", .{constant});
 
     try printValue(writer, self.constants.items[constant]);
     _ = try writer.print("\n", .{});

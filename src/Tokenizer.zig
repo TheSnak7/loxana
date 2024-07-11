@@ -163,7 +163,7 @@ fn errorToken(self: *Self, message: []const u8) Token {
 }
 
 fn createTestToken(name: []const u8, token_type: Token.Tag) Token {
-    return .{ .tag = token_type, .line = 1, .name = name };
+    return .{ .tag = token_type, .line = 1, .lexeme = name };
 }
 
 pub fn expectEqualTokens(expected: []const Token, actual: []const Token) !void {
@@ -251,7 +251,7 @@ test "\"testString\"" {
     defer tokens.deinit();
 
     var correct_tokens = [_]Token{
-        createTestToken("\"testString\"", .string),
+        createTestToken("testString", .string),
         createTestToken("", .eof),
     };
 

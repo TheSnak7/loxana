@@ -16,7 +16,7 @@ const DebugWriter = struct {
 };
 
 //FIXME: make errors more explicit
-const ParseError = error{ EmitError, VmError, GenericParseError, InvalidCharacter };
+const SpcError = error{ EmitError, VmError, GenericParseError, InvalidCharacter };
 
 const Local = struct {
     name: Token,
@@ -212,7 +212,7 @@ pub const CompilationContext = struct {
         return !self.parser.had_error;
     }
 
-    fn declaration(self: *CompilationContext) ParseError!void {
+    fn declaration(self: *CompilationContext) SpcError!void {
         if (self.parser.match(.keyword_var)) {
             try self.varDeclaration();
         } else {
@@ -222,9 +222,13 @@ pub const CompilationContext = struct {
         if (self.parser.panic_mode) self.synchronize();
     }
 
-    fn statement(self: *CompilationContext) ParseError!void {
+    fn statement(self: *CompilationContext) SpcError!void {
         if (self.parser.match(.keyword_print)) {
             try self.printStatement();
+        } else if (self.parser.match(.keyword_if)) {
+            try self.ifStatement();
+        } else if (self.parser.match(.keyword_while)) {
+            try self.whileStatement();
         } else if (self.parser.match(.left_brace)) {
             self.beginScope();
             try self.block();
@@ -234,23 +238,58 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn printStatement(self: *CompilationContext) ParseError!void {
+    fn printStatement(self: *CompilationContext) SpcError!void {
         try self.expression();
         self.parser.consume(.semicolon, "Expect ';' after value.");
         try self.emitOp(.print);
     }
 
-    fn expressionStatement(self: *CompilationContext) ParseError!void {
+    fn whileStatement(self: *CompilationContext) SpcError!void {
+        const loopStart: i32 = @intCast(self.currentChunk().bytes.items.len);
+        self.parser.consume(.left_paren, "Expect '(' after 'while'.");
+        try self.expression();
+        self.parser.consume(.right_paren, "Expect ')' after condition.");
+
+        const exitJump = try self.emitJump(.jump_if_false);
+        try self.emitOp(.pop);
+        try self.statement();
+        try self.emitLoop(loopStart);
+
+        self.patchJump(exitJump);
+        try self.emitOp(.pop);
+    }
+
+    fn expressionStatement(self: *CompilationContext) SpcError!void {
         try self.expression();
         self.parser.consume(.semicolon, "Expect ';' after expression.");
         try self.emitOp(.pop);
     }
 
-    fn expression(self: *CompilationContext) ParseError!void {
+    fn ifStatement(self: *CompilationContext) SpcError!void {
+        self.parser.consume(.left_paren, "Expect '(' after 'if'.");
+        try self.expression();
+        self.parser.consume(.right_paren, "Expect ')' after condition.");
+
+        const thenJump = try self.emitJump(.jump_if_false);
+        try self.emitOp(.pop);
+        try self.statement();
+
+        const elseJump = try self.emitJump(.jump);
+
+        self.patchJump(thenJump);
+        try self.emitOp(.pop);
+
+        if (self.parser.match(.keyword_else)) {
+            try self.statement();
+        }
+        self.patchJump(elseJump);
+    }
+
+    fn expression(self: *CompilationContext) SpcError!void {
         try self.parsePrecedence(.assignment);
     }
 
-    fn block(self: *CompilationContext) ParseError!void {
+    fn block(self: *CompilationContext) SpcError!void {
         while (!self.parser.check(.right_brace) and !self.parser.check(.eof)) {
             try self.declaration();
         }
@@ -258,7 +297,7 @@ pub const CompilationContext = struct {
         self.parser.consume(.right_brace, "Expect '}' after block");
     }
 
-    fn varDeclaration(self: *CompilationContext) ParseError!void {
+    fn varDeclaration(self: *CompilationContext) SpcError!void {
         const global = try self.parseVariable("Expect variable name.");
 
         if (self.parser.match(.equal)) {
@@ -272,7 +311,7 @@ pub const CompilationContext = struct {
         try self.defineVariable(global);
     }
 
-    fn parsePrecedence(self: *CompilationContext, precedence: Precedence) ParseError!void {
+    fn parsePrecedence(self: *CompilationContext, precedence: Precedence) SpcError!void {
         self.parser.advance();
         const prefix = getRule(self.parser.previous.tag).prefix orelse {
             self.parser.errorAtPrevious("Expect expression.");
@@ -281,7 +320,7 @@ pub const CompilationContext = struct {
         const canAssign = @intFromEnum(precedence) <= @intFromEnum(Precedence.assignment);
 
         prefix(self, canAssign) catch {
-            return ParseError.GenericParseError;
+            return SpcError.GenericParseError;
         };
 
         while (@intFromEnum(precedence) <= @intFromEnum(getRule(self.parser.current.tag).precedence)) {
@@ -289,7 +328,7 @@ pub const CompilationContext = struct {
             const infix = getRule(self.parser.previous.tag).infix;
             if (infix) |ifx| {
                 ifx(self, canAssign) catch {
-                    return ParseError.GenericParseError;
+                    return SpcError.GenericParseError;
                 };
             } else {
                 safeUnreachable(@src());
@@ -301,9 +340,9 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn identifierConstant(self: *CompilationContext, token: Token) ParseError!u8 {
+    fn identifierConstant(self: *CompilationContext, token: Token) SpcError!u8 {
         const str = Object.String.copy(self.vm, token.lexeme) catch {
-            return ParseError.VmError;
+            return SpcError.VmError;
         };
         return self.makeConstant(str.obj.asValue());
     }
@@ -336,10 +375,10 @@ pub const CompilationContext = struct {
         }
 
         const local: Local = .{ .name = token, .depth = -1 };
-        self.current.locals.append(local) catch return ParseError.VmError;
+        self.current.locals.append(local) catch return SpcError.VmError;
     }
 
-    fn declareVariable(self: *CompilationContext) ParseError!void {
+    fn declareVariable(self: *CompilationContext) SpcError!void {
         if (self.current.scope_depth == 0) return;
 
         const name = self.parser.previous;
@@ -373,7 +412,7 @@ pub const CompilationContext = struct {
         self.current.locals.items[idx].depth = @intCast(self.current.scope_depth);
     }
 
-    fn defineVariable(self: *CompilationContext, global: u8) ParseError!void {
+    fn defineVariable(self: *CompilationContext, global: u8) SpcError!void {
         if (self.current.scope_depth > 0) {
             self.markInitialized();
             return;
@@ -383,19 +422,19 @@ pub const CompilationContext = struct {
         try self.emitByte(global);
     }
 
-    fn variable(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn variable(self: *CompilationContext, canAssign: bool) SpcError!void {
         try self.namedVariable(self.parser.previous, canAssign);
     }
 
-    fn string(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn string(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = canAssign;
         const str = Object.String.copy(self.vm, self.parser.previous.lexeme) catch {
-            return ParseError.VmError;
+            return SpcError.VmError;
         };
         try self.emitConstant(str.obj.asValue());
     }
 
-    fn namedVariable(self: *CompilationContext, token: Token, canAssign: bool) ParseError!void {
+    fn namedVariable(self: *CompilationContext, token: Token, canAssign: bool) SpcError!void {
         var get_op: OpCode = undefined;
         var set_op: OpCode = undefined;
         var arg: u8 = undefined;
@@ -420,17 +459,28 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn andFn(self: *CompilationContext, canAssign: bool) ParseError!void {
-        _ = self;
+    fn andFn(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = canAssign;
+        const endJump = try self.emitJump(.jump_if_false);
+        try self.emitOp(.pop);
+        try self.parsePrecedence(.@"and");
+
+        self.patchJump(endJump);
     }
 
-    fn orFn(self: *CompilationContext, canAssign: bool) ParseError!void {
-        _ = self;
+    fn orFn(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = canAssign;
+        const elseJump = try self.emitJump(.jump_if_false);
+        const endJump = try self.emitJump(.jump);
+
+        self.patchJump(elseJump);
+        try self.emitOp(.pop);
+
+        try self.parsePrecedence(.@"or");
+        self.patchJump(endJump);
     }
 
-    fn literal(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn literal(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = canAssign;
         switch (self.parser.previous.tag) {
             .keyword_false => try self.emitOp(.op_false),
@@ -440,23 +490,23 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn super(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn super(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = self;
         _ = canAssign;
     }
 
-    fn this(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn this(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = self;
         _ = canAssign;
     }
 
-    fn grouping(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn grouping(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = canAssign;
         try self.expression();
         self.parser.consume(.right_paren, "Expected ')' after expression.");
     }
 
-    fn binary(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn binary(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = canAssign;
         const operator_tag = self.parser.previous.tag;
         const rule = getRule(operator_tag);
@@ -477,7 +527,7 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn unary(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn unary(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = canAssign;
         const operator_tag = self.parser.previous.tag;
 
@@ -490,7 +540,7 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn number(self: *CompilationContext, canAssign: bool) ParseError!void {
+    fn number(self: *CompilationContext, canAssign: bool) SpcError!void {
         _ = canAssign;
         const value = try std.fmt.parseFloat(f64, self.parser.previous.lexeme);
         try self.emitConstant(Value{ .number = value });
@@ -518,9 +568,9 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn makeConstant(self: *CompilationContext, val: Value) ParseError!u8 {
+    fn makeConstant(self: *CompilationContext, val: Value) SpcError!u8 {
         const constant = self.currentChunk().addConstant(val) catch {
-            return ParseError.VmError;
+            return SpcError.VmError;
         };
         if (constant > std.math.maxInt(Chunk.ConstantIndex)) {
             self.parser.errorAtPrevious("Too many constants in one chunk.");
@@ -530,52 +580,80 @@ pub const CompilationContext = struct {
         return @intCast(constant);
     }
 
-    fn emitConstant(self: *CompilationContext, val: Value) ParseError!void {
+    fn emitConstant(self: *CompilationContext, val: Value) SpcError!void {
         self.emitOp(.constant) catch {
-            return ParseError.EmitError;
+            return SpcError.EmitError;
         };
         self.emitByte(try self.makeConstant(val)) catch {
-            return ParseError.EmitError;
+            return SpcError.EmitError;
         };
     }
 
-    fn emitByte(self: *CompilationContext, byte: u8) ParseError!void {
+    fn patchJump(self: *CompilationContext, offset: i32) void {
+        const jump: i32 = @as(i32, @intCast(self.currentChunk().bytes.items.len)) - offset - 2;
+
+        if (jump > std.math.maxInt(u16)) {
+            self.parser.errorAtPrevious("Too much code to jump over.");
+        }
+
+        const j16 = @as(u16, @truncate(@as(u32, @intCast(jump))));
+
+        const bytes = std.mem.toBytes(j16);
+
+        self.currentChunk().bytes.items[@intCast(offset)] = bytes[0];
+        self.currentChunk().bytes.items[@intCast(offset + 1)] = bytes[1];
+    }
+
+    fn emitByte(self: *CompilationContext, byte: u8) SpcError!void {
         self.currentChunk().write(u8, byte, self.parser.previous.line) catch {
-            return ParseError.EmitError;
+            return SpcError.EmitError;
         };
     }
 
-    fn emitBytes(self: *CompilationContext, byte1: u8, byte2: u8) void {
-        self.emitByte(byte1) catch {
-            return ParseError.EmitError;
-        };
-        self.emitByte(byte2) catch {
-            return ParseError.EmitError;
-        };
+    fn emitLoop(self: *CompilationContext, loopStart: i32) SpcError!void {
+        try self.emitOp(.loop);
+
+        const offset = @as(i32, @intCast(self.currentChunk().bytes.items.len)) - loopStart + 2;
+        if (offset > std.math.maxInt(u16)) {
+            self.parser.errorAtPrevious("Loop body too large:");
+        }
+
+        const l16 = @as(u16, @truncate(@as(u32, @intCast(offset))));
+        const bytes = std.mem.toBytes(l16);
+
+        try self.emitByte(bytes[0]);
+        try self.emitByte(bytes[1]);
     }
 
-    fn emitOp(self: *CompilationContext, opcode: OpCode) ParseError!void {
+    fn emitJump(self: *CompilationContext, opcode: OpCode) SpcError!i32 {
+        try self.emitOp(opcode);
+        try self.emitByte(0xff);
+        try self.emitByte(0xff);
+        return @intCast(self.currentChunk().bytes.items.len - 2);
+    }
+
+    fn emitOp(self: *CompilationContext, opcode: OpCode) SpcError!void {
         self.currentChunk().writeOp(opcode, self.parser.previous.line) catch {
-            return ParseError.EmitError;
+            return SpcError.EmitError;
         };
     }
 
-    fn emitOps(self: *CompilationContext, op1: OpCode, op2: OpCode) ParseError!void {
+    fn emitOps(self: *CompilationContext, op1: OpCode, op2: OpCode) SpcError!void {
         self.currentChunk().writeOp(op1, self.parser.previous.line) catch {
-            return ParseError.EmitError;
+            return SpcError.EmitError;
         };
         self.currentChunk().writeOp(op2, self.parser.previous.line) catch {
-            return ParseError.EmitError;
+            return SpcError.EmitError;
         };
     }
 
-    fn emitReturn(self: *CompilationContext) ParseError!void {
+    fn emitReturn(self: *CompilationContext) SpcError!void {
         self.emitOp(.ret) catch {
-            return ParseError.EmitError;
+            return SpcError.EmitError;
         };
     }
 
-    fn endCompiler(self: *CompilationContext) ParseError!void {
+    fn endCompiler(self: *CompilationContext) SpcError!void {
         try self.emitReturn();
 
         if (Config.debug_print_code) {
@@ -589,14 +667,17 @@ pub const CompilationContext = struct {
         self.current.scope_depth += 1;
     }
 
-    fn endScope(self: *CompilationContext) ParseError!void {
+    fn endScope(self: *CompilationContext) SpcError!void {
         self.current.scope_depth -= 1;
 
-        while (self.current.locals.popOrNull()) |l| {
-            if (l.depth <= self.current.scope_depth) break;
+        while (self.current.locals.items.len > 0 and
+            self.current.locals.items[self.current.locals.items.len - 1].depth > self.current.scope_depth)
+        {
             self.emitOp(.pop) catch {
-                return ParseError.EmitError;
+                return SpcError.EmitError;
             };
+
+            _ = self.current.locals.pop();
         }
     }
 

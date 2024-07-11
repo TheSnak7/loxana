@@ -1,5 +1,8 @@
 pub const OpCode = enum(u8) {
     ret,
+    jump,
+    jump_if_false,
+    loop,
     constant,
     negate,
     add,
@@ -47,7 +50,12 @@ pub const OpCode = enum(u8) {
             .set_local,
             .get_local,
             => 2,
-            .constant_long => 4,
+            .jump,
+            .jump_if_false,
+            .loop,
+            => 3,
+            .constant_long,
+            => 4,
         };
     }
 };

@@ -57,7 +57,11 @@ fn printHelp() void {
 
 var lineBuf: [1024]u8 = undefined;
 fn repl(alloc: std.mem.Allocator, stdout: anytype, stdin: anytype) !void {
-    var vm = VM.init(alloc);
+    const funcs: VM.ExternFuncs = .{
+        .stdout = std.io.getStdOut().writer().any(),
+    };
+
+    var vm = VM.init(alloc, funcs);
 
     while (true) {
         try stdout.print("> ", .{});
@@ -69,22 +73,40 @@ fn repl(alloc: std.mem.Allocator, stdout: anytype, stdin: anytype) !void {
             vm.deinit();
             return;
         }
+
         _ = try vm.interpret(alloc, line);
     }
 }
 
 fn runFile(alloc: std.mem.Allocator, path: []const u8) !void {
-    const file = try std.fs.cwd().readFileAlloc(alloc, path, 1000_000_000);
+    const src = try loadFile(alloc, path);
+    defer alloc.free(src);
 
-    var vm = VM.init(alloc);
-
-    const result = try vm.interpret(alloc, file);
+    const result = try runSrc(alloc, src);
 
     switch (result) {
         .compile_error => std.process.exit(65),
         .runtime_error => std.process.exit(70),
         .ok => return,
     }
+}
+
+fn runSrc(alloc: std.mem.Allocator, src: []const u8) !VM.InterpretResult {
+    const funcs: VM.ExternFuncs = .{
+        .stdout = std.io.getStdOut().writer().any(),
+    };
+
+    var vm = VM.init(alloc, funcs);
+    defer vm.deinit();
+
+    const result = try vm.interpret(alloc, src);
+
+    return result;
+}
+
+fn loadFile(alloc: std.mem.Allocator, path: []const u8) ![]const u8 {
+    const src = try std.fs.cwd().readFileAlloc(alloc, path, 1000_000_000);
+    return src;
 }
 
 test "run all tests" {
