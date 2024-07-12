@@ -225,6 +225,8 @@ pub const CompilationContext = struct {
     fn statement(self: *CompilationContext) SpcError!void {
         if (self.parser.match(.keyword_print)) {
             try self.printStatement();
+        } else if (self.parser.match(.keyword_for)) {
+            try self.forStatement();
         } else if (self.parser.match(.keyword_if)) {
             try self.ifStatement();
         } else if (self.parser.match(.keyword_while)) {
@@ -245,17 +247,17 @@ pub const CompilationContext = struct {
     }
 
     fn whileStatement(self: *CompilationContext) SpcError!void {
-        const loopStart: i32 = @intCast(self.currentChunk().bytes.items.len);
+        const loop_start: i32 = @intCast(self.currentChunk().bytes.items.len);
         self.parser.consume(.left_paren, "Expect '(' after 'while'.");
         try self.expression();
         self.parser.consume(.right_paren, "Expect ')' after condition.");
 
-        const exitJump = try self.emitJump(.jump_if_false);
+        const exit_jump = try self.emitJump(.jump_if_false);
         try self.emitOp(.pop);
         try self.statement();
-        try self.emitLoop(loopStart);
+        try self.emitLoop(loop_start);
 
-        self.patchJump(exitJump);
+        self.patchJump(exit_jump);
         try self.emitOp(.pop);
     }
 
@@ -265,24 +267,66 @@ pub const CompilationContext = struct {
         try self.emitOp(.pop);
     }
 
+    fn forStatement(self: *CompilationContext) SpcError!void {
+        self.beginScope();
+        self.parser.consume(.left_paren, "Expect '(' after 'for'.");
+        if (self.parser.match(.semicolon)) {} else if (self.parser.match(.keyword_var)) {
+            try self.varDeclaration();
+        } else {
+            try self.expressionStatement();
+        }
+        var loop_start: i32 = @intCast(self.currentChunk().bytes.items.len);
+        var exit_jump: i32 = -1;
+
+        if (!self.parser.match(.semicolon)) {
+            try self.expression();
+            self.parser.consume(.semicolon, "Expect ';' after loop condition.");
+
+            exit_jump = try self.emitJump(.jump_if_false);
+            try self.emitOp(.pop);
+        }
+
+        if (!self.parser.match(.right_paren)) {
+            const body_jump = try self.emitJump(.jump);
+            const increment_start: i32 = @intCast(self.currentChunk().bytes.items.len);
+            try self.expression();
+            try self.emitOp(.pop);
+            self.parser.consume(.right_paren, "Expect ')' after for clauses.");
+
+            try self.emitLoop(loop_start);
+            loop_start = increment_start;
+            self.patchJump(body_jump);
+        }
+
+        try self.statement();
+        try self.emitLoop(loop_start);
+
+        if (exit_jump != -1) {
+            self.patchJump(exit_jump);
+            try self.emitOp(.pop);
+        }
+
+        try self.endScope();
+    }
+
     fn ifStatement(self: *CompilationContext) SpcError!void {
         self.parser.consume(.left_paren, "Expect '(' after 'if'.");
         try self.expression();
         self.parser.consume(.right_paren, "Expect ')' after condition.");
 
-        const thenJump = try self.emitJump(.jump_if_false);
+        const then_jump = try self.emitJump(.jump_if_false);
         try self.emitOp(.pop);
         try self.statement();
 
-        const elseJump = try self.emitJump(.jump);
+        const else_jump = try self.emitJump(.jump);
 
-        self.patchJump(thenJump);
+        self.patchJump(then_jump);
         try self.emitOp(.pop);
 
         if (self.parser.match(.keyword_else)) {
             try self.statement();
         }
-        self.patchJump(elseJump);
+        self.patchJump(else_jump);
     }
 
     fn expression(self: *CompilationContext) SpcError!void {
@@ -317,9 +361,9 @@ pub const CompilationContext = struct {
             self.parser.errorAtPrevious("Expect expression.");
             return;
         };
-        const canAssign = @intFromEnum(precedence) <= @intFromEnum(Precedence.assignment);
+        const can_assign = @intFromEnum(precedence) <= @intFromEnum(Precedence.assignment);
 
-        prefix(self, canAssign) catch {
+        prefix(self, can_assign) catch {
             return SpcError.GenericParseError;
         };
 
@@ -327,7 +371,7 @@ pub const CompilationContext = struct {
             self.parser.advance();
             const infix = getRule(self.parser.previous.tag).infix;
             if (infix) |ifx| {
-                ifx(self, canAssign) catch {
+                ifx(self, can_assign) catch {
                     return SpcError.GenericParseError;
                 };
             } else {
@@ -335,7 +379,7 @@ pub const CompilationContext = struct {
             }
         }
 
-        if (canAssign and self.parser.match(.equal)) {
+        if (can_assign and self.parser.match(.equal)) {
             self.parser.errorAtPrevious("Invalid assignment target.");
         }
     }
@@ -426,15 +470,15 @@ pub const CompilationContext = struct {
         try self.namedVariable(self.parser.previous, canAssign);
     }
 
-    fn string(self: *CompilationContext, canAssign: bool) SpcError!void {
-        _ = canAssign;
+    fn string(self: *CompilationContext, can_assign: bool) SpcError!void {
+        _ = can_assign;
         const str = Object.String.copy(self.vm, self.parser.previous.lexeme) catch {
             return SpcError.VmError;
         };
         try self.emitConstant(str.obj.asValue());
     }
 
-    fn namedVariable(self: *CompilationContext, token: Token, canAssign: bool) SpcError!void {
+    fn namedVariable(self: *CompilationContext, token: Token, can_assign: bool) SpcError!void {
         var get_op: OpCode = undefined;
         var set_op: OpCode = undefined;
         var arg: u8 = undefined;
@@ -449,7 +493,7 @@ pub const CompilationContext = struct {
             set_op = .set_global;
         }
 
-        if (canAssign and self.parser.match(.equal)) {
+        if (can_assign and self.parser.match(.equal)) {
             try self.expression();
             try self.emitOp(set_op);
             try self.emitByte(arg);
@@ -459,29 +503,29 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn andFn(self: *CompilationContext, canAssign: bool) SpcError!void {
-        _ = canAssign;
-        const endJump = try self.emitJump(.jump_if_false);
+    fn andFn(self: *CompilationContext, can_assign: bool) SpcError!void {
+        _ = can_assign;
+        const end_jump = try self.emitJump(.jump_if_false);
         try self.emitOp(.pop);
         try self.parsePrecedence(.@"and");
 
-        self.patchJump(endJump);
+        self.patchJump(end_jump);
     }
 
-    fn orFn(self: *CompilationContext, canAssign: bool) SpcError!void {
-        _ = canAssign;
-        const elseJump = try self.emitJump(.jump_if_false);
-        const endJump = try self.emitJump(.jump);
+    fn orFn(self: *CompilationContext, can_assign: bool) SpcError!void {
+        _ = can_assign;
+        const else_jump = try self.emitJump(.jump_if_false);
+        const end_jump = try self.emitJump(.jump);
 
-        self.patchJump(elseJump);
+        self.patchJump(else_jump);
         try self.emitOp(.pop);
 
         try self.parsePrecedence(.@"or");
-        self.patchJump(endJump);
+        self.patchJump(end_jump);
     }
 
-    fn literal(self: *CompilationContext, canAssign: bool) SpcError!void {
-        _ = canAssign;
+    fn literal(self: *CompilationContext, can_assign: bool) SpcError!void {
+        _ = can_assign;
         switch (self.parser.previous.tag) {
             .keyword_false => try self.emitOp(.op_false),
             .keyword_true => try self.emitOp(.op_true),
@@ -490,24 +534,24 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn super(self: *CompilationContext, canAssign: bool) SpcError!void {
+    fn super(self: *CompilationContext, can_assign: bool) SpcError!void {
         _ = self;
-        _ = canAssign;
+        _ = can_assign;
     }
 
-    fn this(self: *CompilationContext, canAssign: bool) SpcError!void {
+    fn this(self: *CompilationContext, can_assign: bool) SpcError!void {
         _ = self;
-        _ = canAssign;
+        _ = can_assign;
     }
 
-    fn grouping(self: *CompilationContext, canAssign: bool) SpcError!void {
-        _ = canAssign;
+    fn grouping(self: *CompilationContext, can_assign: bool) SpcError!void {
+        _ = can_assign;
         try self.expression();
         self.parser.consume(.right_paren, "Expected ')' after expression.");
     }
 
-    fn binary(self: *CompilationContext, canAssign: bool) SpcError!void {
-        _ = canAssign;
+    fn binary(self: *CompilationContext, can_assign: bool) SpcError!void {
+        _ = can_assign;
         const operator_tag = self.parser.previous.tag;
         const rule = getRule(operator_tag);
         try self.parsePrecedence(rule.precedence.next());
@@ -527,8 +571,8 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn unary(self: *CompilationContext, canAssign: bool) SpcError!void {
-        _ = canAssign;
+    fn unary(self: *CompilationContext, can_assign: bool) SpcError!void {
+        _ = can_assign;
         const operator_tag = self.parser.previous.tag;
 
         try self.parsePrecedence(.unary);
@@ -540,8 +584,8 @@ pub const CompilationContext = struct {
         }
     }
 
-    fn number(self: *CompilationContext, canAssign: bool) SpcError!void {
-        _ = canAssign;
+    fn number(self: *CompilationContext, can_assign: bool) SpcError!void {
+        _ = can_assign;
         const value = try std.fmt.parseFloat(f64, self.parser.previous.lexeme);
         try self.emitConstant(Value{ .number = value });
     }
