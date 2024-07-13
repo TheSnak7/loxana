@@ -64,9 +64,7 @@ pub fn printInstruction(self: *const Chunk, writer: anytype, offset: u32) !u32 {
     };
 }
 pub fn printJumpInstruction(self: *const Chunk, writer: anytype, opcode: OpCode, sign: i8, offset: u32) !u32 {
-    std.debug.print("\nOffset: {}\n", .{offset});
     const jump: i16 = std.mem.bytesAsValue(i16, self.bytes.items[(offset + 1)..(offset + 3)]).*;
-    std.debug.print("ReadJ: {}\n", .{jump});
 
     try writer.print(" {d} -> {d}", .{
         offset,

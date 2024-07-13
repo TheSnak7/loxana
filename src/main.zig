@@ -62,6 +62,7 @@ fn repl(alloc: std.mem.Allocator, stdout: anytype, stdin: anytype) !void {
     };
 
     var vm = VM.init(alloc, funcs);
+    vm.setupPointers();
 
     while (true) {
         try stdout.print("> ", .{});
@@ -74,7 +75,7 @@ fn repl(alloc: std.mem.Allocator, stdout: anytype, stdin: anytype) !void {
             return;
         }
 
-        _ = try vm.interpret(alloc, line);
+        _ = try vm.interpret(line);
     }
 }
 
@@ -97,9 +98,10 @@ fn runSrc(alloc: std.mem.Allocator, src: []const u8) !VM.InterpretResult {
     };
 
     var vm = VM.init(alloc, funcs);
+    vm.setupPointers();
     defer vm.deinit();
 
-    const result = try vm.interpret(alloc, src);
+    const result = try vm.interpret(src);
 
     return result;
 }

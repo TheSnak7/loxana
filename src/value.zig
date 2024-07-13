@@ -21,7 +21,8 @@ pub const Value = union(Tag) {
             .boolean => |b| try writer.print("{s}", .{if (b) "true" else "false"}),
             .object => |obj| {
                 switch (obj.tag) {
-                    .string => try writer.print("\"{s}\"", .{obj.asString().bytes}),
+                    .string => try writer.print("\"{any}\"", .{obj.asString()}),
+                    .function => try writer.print("{any}", .{obj.asFunction()}),
                 }
             },
         }
@@ -64,6 +65,10 @@ pub const Value = union(Tag) {
         return Object.isObjType(value, .string);
     }
 
+    pub inline fn isFunction(value: *const Value) bool {
+        return Object.isObjType(value, .function);
+    }
+
     pub inline fn isFalsey(value: *const Value) bool {
         return value.isNil() or (value.isBool() and !value.boolean);
     }
@@ -72,8 +77,16 @@ pub const Value = union(Tag) {
         return value.object;
     }
 
+    pub inline fn asNumber(value: *const Value) f64 {
+        return value.number;
+    }
+
     pub inline fn asString(value: *const Value) *Object.String {
         return value.asObj().asString();
+    }
+
+    pub inline fn asFunction(value: *const Value) *Object.Function {
+        return value.asObj().asFunction();
     }
 
     pub inline fn areEqual(a: Value, b: Value) bool {

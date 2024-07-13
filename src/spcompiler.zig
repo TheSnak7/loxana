@@ -23,9 +23,36 @@ const Local = struct {
     depth: i32,
 };
 
+const FunctionType = enum {
+    function,
+    script,
+};
+
 const Compiler = struct {
+    function: *Object.Function,
+    typ: FunctionType,
+
     locals: std.ArrayList(Local),
     scope_depth: u32,
+
+    fn init(vm: *VM, typ: FunctionType) !Compiler {
+        const func = try Object.Function.create(vm);
+        errdefer func.destroy(vm.alloc);
+        var compiler: Compiler = .{
+            .function = func,
+            .typ = typ,
+            .scope_depth = 0,
+            .locals = std.ArrayList(Local).init(vm.alloc),
+        };
+
+        compiler.locals.append(.{
+            .depth = 0,
+            .name = undefined,
+        }) catch {
+            return SpcError.VmError;
+        };
+        return compiler;
+    }
 };
 
 const Precedence = enum(u8) {
@@ -183,15 +210,12 @@ pub const CompilationContext = struct {
     current: Compiler,
     compiling_chunk: *Chunk,
 
-    pub fn init(vm: *VM) CompilationContext {
+    pub fn init(vm: *VM) !CompilationContext {
         return .{
             .vm = vm,
             .parser = undefined,
             .compiling_chunk = undefined,
-            .current = .{
-                .scope_depth = 0,
-                .locals = std.ArrayList(Local).init(vm.alloc),
-            },
+            .current = try Compiler.init(vm, .script),
         };
     }
 
@@ -199,17 +223,18 @@ pub const CompilationContext = struct {
         self.current.locals.deinit();
     }
 
-    pub fn compile(self: *CompilationContext, src: []const u8, chunk: *Chunk) !bool {
+    pub fn compile(self: *CompilationContext, src: []const u8) !?*Object.Function {
         self.parser = Parser.init(src);
 
-        self.compiling_chunk = chunk;
+        self.compiling_chunk = &self.current.function.chunk;
 
         self.parser.advance();
         while (!self.parser.match(.eof)) {
             try self.declaration();
         }
-        try self.endCompiler();
-        return !self.parser.had_error;
+        const function = try self.endCompiler();
+
+        return if (self.parser.had_error) null else function;
     }
 
     fn declaration(self: *CompilationContext) SpcError!void {
@@ -697,14 +722,19 @@ pub const CompilationContext = struct {
         };
     }
 
-    fn endCompiler(self: *CompilationContext) SpcError!void {
+    fn endCompiler(self: *CompilationContext) SpcError!*Object.Function {
         try self.emitReturn();
+        const function = self.current.function;
 
         if (Config.debug_print_code) {
             if (!self.parser.had_error) {
-                try self.currentChunk().disassemble(DebugWriter, "debug");
+                const name = if (function.name) |n| n.bytes else "<script>";
+                //try self.currentChunk().disassemble(DebugWriter, name);
+                try function.chunk.disassemble(DebugWriter, name);
             }
         }
+
+        return function;
     }
 
     fn beginScope(self: *CompilationContext) void {
@@ -726,6 +756,6 @@ pub const CompilationContext = struct {
     }
 
     fn currentChunk(self: *CompilationContext) *Chunk {
-        return self.compiling_chunk;
+        return &self.current.function.chunk;
     }
 };

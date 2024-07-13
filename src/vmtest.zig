@@ -10,9 +10,10 @@ fn runCode(src: []const u8, writer: std.io.AnyWriter) !void {
     };
 
     var vm = VM.init(alloc, funcs);
+    vm.setupPointers();
     defer vm.deinit();
 
-    const result = try vm.interpret(alloc, src);
+    const result = try vm.interpret(src);
     std.debug.assert(result == VM.InterpretResult.ok);
 }
 
