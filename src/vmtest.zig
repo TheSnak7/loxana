@@ -87,9 +87,9 @@ test "equal" {
 }
 
 test "while loop" {
-    try testFile("loxtests/while.lox", "100\n");
+    try testFile("loxtests/while.lox", "10000\n");
 }
 
 test "for loop" {
-    try testFile("loxtests/while.lox", "100\n");
+    try testFile("loxtests/while.lox", "10000\n");
 }
